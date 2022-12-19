@@ -1,6 +1,9 @@
 import json
 import os
+import sys
+sys.path.append('./package')
 import googleapiclient.discovery
+
 
 def read_secrets() -> dict:
     filename = os.path.join('secrets.json')
@@ -10,15 +13,16 @@ def read_secrets() -> dict:
     except FileNotFoundError:
         return {}
 
+secrets = read_secrets()
+apikey =  secrets["apikey"]
+playlistId = secrets["playlistId"]
 scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
 api_service_name = "youtube"
 api_version = "v3"
 youtube = googleapiclient.discovery.build(api_service_name, api_version, developerKey = apikey)
-secrets = read_secrets()
+
 ids = []
 stats = {"views": 0, "likes": 0}
-apikey =  secrets["apikey"]
-playlistId = secrets["playlistId"]
 
 def Get_Playlist_Items(playlistId: str, nextPageToken: str, itemcount: int) -> None:
     maxResults=50
