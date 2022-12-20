@@ -1,9 +1,6 @@
 import json
 import os
-import sys
-sys.path.append('./package')
-import googleapiclient.discovery
-
+import requests
 
 def read_secrets() -> dict:
     filename = os.path.join('secrets.json')
@@ -16,31 +13,30 @@ def read_secrets() -> dict:
 secrets = read_secrets()
 apikey =  secrets["apikey"]
 playlistId = secrets["playlistId"]
-scopes = ["https://www.googleapis.com/auth/youtube.readonly"]
 api_service_name = "youtube"
 api_version = "v3"
-youtube = googleapiclient.discovery.build(api_service_name, api_version, developerKey = apikey)
+URL = "https://youtube.googleapis.com/" + api_service_name + "/" + api_version 
 
-ids = []
-stats = {"views": 0, "likes": 0}
-
-def Get_Playlist_Items(playlistId: str, nextPageToken: str, itemcount: int) -> None:
+def Get_Playlist_Items(playlistId: str, nextPageToken: str, itemcount: int) -> list:
     maxResults=50
-
+    ids = []
+    url = URL + "/" + "playlistItems"
     if nextPageToken == "": #If no page token supplied assuming first call
-        request = youtube.playlistItems().list(
-            part="contentDetails",
-            maxResults=maxResults,
-            playlistId=playlistId
-        )
+        params = {
+            "part": "contentDetails",
+            "maxResults": maxResults,
+            "playlistId": playlistId,
+            "key": apikey
+        }
     else:
-        request = youtube.playlistItems().list(
-            part="contentDetails",
-            maxResults=maxResults,
-            pageToken=nextPageToken,
-            playlistId=playlistId
-        )
-    response = request.execute()
+        params = {
+            "part": "contentDetails",
+            "maxResults": maxResults,
+            "playlistId": playlistId,
+            "pageToken": nextPageToken,
+            "key": apikey
+        }
+    response = requests.get(url= url, params=params).json()
     totalResults = response["pageInfo"]["totalResults"]
     itemcount += len(response["items"])
 
@@ -49,31 +45,32 @@ def Get_Playlist_Items(playlistId: str, nextPageToken: str, itemcount: int) -> N
 
     if itemcount < totalResults:
         pageToken = response["nextPageToken"]
-        Get_Playlist_Items(playlistId,pageToken,itemcount)
-    return
+        ids = ids + Get_Playlist_Items(playlistId,pageToken,itemcount)
+    return ids
 
-def Count_Views(ids: list, itemcount: int) -> None:
-
+def Count_Views(ids: list, itemcount: int) -> dict:
+    stats = {"views": 0, "likes": 0}
+    maxResults=50
+    url = URL + "/" + "videos"
     videoids = ids[itemcount:itemcount+50]
-
-    request = youtube.videos().list(
-        part="statistics",
-        id=",".join(videoids)
-    )
-    response = request.execute()
-
+    params = {
+        "part": "statistics",
+        "maxResults": maxResults,
+        "id": ",".join(videoids),
+        "key": apikey
+    }
+    response = requests.get(url= url, params=params).json()
     if len(ids) > len(videoids):
         Count_Views(ids[itemcount + 50:], itemcount + len(videoids))
-
     for item in response["items"]:
         item = item["statistics"]
         stats["views"] += int(item["viewCount"])
         stats["likes"] += int(item["likeCount"])
-    return
+    return stats
 
 def lambda_handler(event, context):
-    Get_Playlist_Items(playlistId,"",0)
-    Count_Views(ids,0)
+    ids = Get_Playlist_Items(playlistId,"",0)
+    stats = Count_Views(ids,0)
     return {
         'statusCode': 200,
         'body': json.dumps(stats)
