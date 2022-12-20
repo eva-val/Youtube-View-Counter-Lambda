@@ -17,7 +17,7 @@ api_service_name = "youtube"
 api_version = "v3"
 URL = "https://youtube.googleapis.com/" + api_service_name + "/" + api_version 
 
-def Get_Playlist_Items(playlistId: str, nextPageToken: str, itemcount: int) -> list:
+def Get_Playlist_Items(playlistId: str, nextPageToken: str = "", itemcount: int = 0) -> list:
     maxResults=50
     ids = []
     url = URL + "/" + "playlistItems"
@@ -48,7 +48,7 @@ def Get_Playlist_Items(playlistId: str, nextPageToken: str, itemcount: int) -> l
         ids = ids + Get_Playlist_Items(playlistId,pageToken,itemcount)
     return ids
 
-def Count_Views(ids: list, itemcount: int) -> dict:
+def Count_Views(ids: list, itemcount: int = 0) -> dict:
     stats = {"views": 0, "likes": 0}
     maxResults=50
     url = URL + "/" + "videos"
@@ -69,8 +69,8 @@ def Count_Views(ids: list, itemcount: int) -> dict:
     return stats
 
 def lambda_handler(event, context):
-    ids = Get_Playlist_Items(playlistId,"",0)
-    stats = Count_Views(ids,0)
+    ids = Get_Playlist_Items(playlistId)
+    stats = Count_Views(ids)
     return {
         'statusCode': 200,
         'body': json.dumps(stats)
