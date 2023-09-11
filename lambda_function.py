@@ -1,30 +1,35 @@
 from typing import List, Tuple
 import os
-import json, requests
 from concurrent.futures import ThreadPoolExecutor
+import json
+import urllib.request
+import urllib.parse
+from dotenv import load_dotenv
+
+load_dotenv()
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 URL = f"https://youtube.googleapis.com/{API_SERVICE_NAME}/{API_VERSION}"
+API_KEY = os.environ["API_KEY"]
+PLAYLIST_ID = os.environ["PLAYLIST_ID"]
 
 
-def read_secrets() -> json:
-    filename = os.path.join("secrets.json")
-    try:
-        with open(filename, mode="rb") as file:
-            return json.loads(file.read())
-    except FileNotFoundError:
-        print("secrets.json not found. Is it loaded?")
+def fetch_url(url: str, params: dict) -> dict:
+    query_string = urllib.parse.urlencode(params)
+    full_url = f"{url}?{query_string}"
+    with urllib.request.urlopen(full_url) as response:
+        return json.loads(response.read().decode())
 
 
-def get_playlist_items(playlist_items: str, apikey: str) -> List[str]:
+def get_playlist_items() -> List[str]:
     max_results = 50
     url = f"{URL}/playlistItems"
     params = {
         "part": "contentDetails",
         "maxResults": max_results,
-        "playlistId": playlist_items,
-        "key": apikey,
+        "playlistId": PLAYLIST_ID,
+        "key": API_KEY,
     }
     ids = []
     total_results = 0
@@ -34,9 +39,7 @@ def get_playlist_items(playlist_items: str, apikey: str) -> List[str]:
     while True:
         if page_token:
             params["pageToken"] = page_token
-
-        response = requests.get(url=url, params=params, timeout=10).json()
-
+        response = fetch_url(url=url, params=params)
         if item_count == 0:  # Assuming first iteration
             total_results = response["pageInfo"]["totalResults"]
             ids = [None] * total_results  # Preallocate list
@@ -55,16 +58,16 @@ def get_playlist_items(playlist_items: str, apikey: str) -> List[str]:
     return ids
 
 
-def count_views(video_ids: List[str], apikey: str) -> Tuple:
+def count_views(video_ids: List[str]) -> Tuple:
     max_results = 50
     url = f"{URL}/videos"
     params = {
         "part": "statistics",
         "maxResults": max_results,
         "id": ",".join(video_ids),
-        "key": apikey,
+        "key": API_KEY,
     }
-    response = requests.get(url=url, params=params, timeout=10).json()
+    response = fetch_url(url=url, params=params)
     views, likes = 0, 0
     for item in response["items"]:
         item = item["statistics"]
@@ -76,8 +79,8 @@ def count_views(video_ids: List[str], apikey: str) -> Tuple:
     return views, likes
 
 
-def fetch_and_count(playlist_items, apikey):
-    ids = get_playlist_items(playlist_items=playlist_items, apikey=apikey)
+def fetch_and_count():
+    ids = get_playlist_items()
     stats = {"views": 0, "likes": 0}
 
     # Splitting into sublists of 50
@@ -86,7 +89,7 @@ def fetch_and_count(playlist_items, apikey):
 
     def process_sublist(fifty_ids):
         nonlocal stats
-        views, likes = count_views(video_ids=fifty_ids, apikey=apikey)
+        views, likes = count_views(video_ids=fifty_ids)
         stats["views"] += views
         stats["likes"] += likes
 
@@ -98,23 +101,16 @@ def fetch_and_count(playlist_items, apikey):
 
 
 def lambda_handler(event, context):
-    secrets = read_secrets()
-    key = secrets["apikey"]
-    playlist_id = secrets["playlistId"]
     return {
         "statusCode": 200,
-        "body": json.dumps(fetch_and_count(playlist_items=playlist_id, apikey=key)),
+        "body": json.dumps(fetch_and_count()),
     }
 
 
 # if __name__ == "__main__":
 #     import time
 #     start = time.time()
-#     secrets = read_secrets()
-#     key = secrets["apikey"]
-#     playlist_id = secrets["playlistId"]
-#     start = time.time()
-#     stats = fetch_and_count(playlist_items=playlist_id, apikey=key)
+#     stats = fetch_and_count()
 #     stop = time.time()
 #     print(stats)
 #     print(f"Took: {(stop-start)} seconds")
