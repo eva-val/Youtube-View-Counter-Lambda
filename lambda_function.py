@@ -4,9 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import urllib.request
 import urllib.parse
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
-load_dotenv()
+# load_dotenv()
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
@@ -73,9 +73,6 @@ def count_views(video_ids: List[str]) -> Tuple:
         item = item["statistics"]
         views += int(item["viewCount"])
         likes += int(item["likeCount"])
-        # stats["views"] += int(item["viewCount"])
-        # stats["likes"] += int(item["likeCount"])
-    # return stats
     return views, likes
 
 
