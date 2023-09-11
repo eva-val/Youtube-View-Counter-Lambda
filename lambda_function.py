@@ -1,6 +1,7 @@
-from typing import Dict, List
-import os, time
+from typing import List, Tuple
+import os
 import json, requests
+from concurrent.futures import ThreadPoolExecutor
 
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
@@ -16,86 +17,104 @@ def read_secrets() -> json:
         print("secrets.json not found. Is it loaded?")
 
 
-def get_playlist_items(
-    playlistId: str, apikey: str, nextPageToken: str = "", itemcount: int = 0
-) -> List:
+def get_playlist_items(playlist_items: str, apikey: str) -> List[str]:
     max_results = 50
+    url = f"{URL}/playlistItems"
+    params = {
+        "part": "contentDetails",
+        "maxResults": max_results,
+        "playlistId": playlist_items,
+        "key": apikey,
+    }
     ids = []
-    url = URL + "/" + "playlistItems"
-    if nextPageToken == "":  # If no page token supplied assuming first call
-        params = {
-            "part": "contentDetails",
-            "maxResults": max_results,
-            "playlistId": playlistId,
-            "key": apikey,
-        }
-    else:
-        params = {
-            "part": "contentDetails",
-            "maxResults": max_results,
-            "playlistId": playlistId,
-            "pageToken": nextPageToken,
-            "key": apikey,
-        }
-    response = requests.get(url=url, params=params, timeout=10).json()
-    totalResults = response["pageInfo"]["totalResults"]
-    itemcount += len(response["items"])
+    total_results = 0
+    item_count = 0
+    page_token = None
 
-    for item in response["items"]:
-        ids.append(str(item["contentDetails"]["videoId"]))
+    while True:
+        if page_token:
+            params["pageToken"] = page_token
 
-    if itemcount < totalResults:
-        pageToken = response["nextPageToken"]
-        ids += get_playlist_items(
-            playlistId=playlistId,
-            apikey=apikey,
-            nextPageToken=pageToken,
-            itemcount=itemcount,
-        )
+        response = requests.get(url=url, params=params, timeout=10).json()
+
+        if item_count == 0:  # Assuming first iteration
+            total_results = response["pageInfo"]["totalResults"]
+            ids = [None] * total_results  # Preallocate list
+
+        new_ids = [str(item["contentDetails"]["videoId"]) for item in response["items"]]
+        ids[item_count : item_count + len(new_ids)] = new_ids
+        item_count += len(new_ids)
+
+        if item_count >= total_results:
+            break
+
+        page_token = response.get("nextPageToken", None)
+        if not page_token:
+            break
+
     return ids
 
 
-def count_views(ids: list, apikey: str, itemcount: int = 0) -> Dict:
-    stats = {"views": 0, "likes": 0}
+def count_views(video_ids: List[str], apikey: str) -> Tuple:
     max_results = 50
     url = f"{URL}/videos"
-    videoids = ids[itemcount : itemcount + 50]
     params = {
         "part": "statistics",
         "maxResults": max_results,
-        "id": ",".join(videoids),
+        "id": ",".join(video_ids),
         "key": apikey,
     }
     response = requests.get(url=url, params=params, timeout=10).json()
-    if len(ids) > len(videoids):
-        count_views(
-            ids=ids[itemcount + 50 :],
-            apikey=apikey,
-            itemcount=itemcount + len(videoids),
-        )
+    views, likes = 0, 0
     for item in response["items"]:
         item = item["statistics"]
-        stats["views"] += int(item["viewCount"])
-        stats["likes"] += int(item["likeCount"])
+        views += int(item["viewCount"])
+        likes += int(item["likeCount"])
+        # stats["views"] += int(item["viewCount"])
+        # stats["likes"] += int(item["likeCount"])
+    # return stats
+    return views, likes
+
+
+def fetch_and_count(playlist_items, apikey):
+    ids = get_playlist_items(playlist_items=playlist_items, apikey=apikey)
+    stats = {"views": 0, "likes": 0}
+
+    # Splitting into sublists of 50
+    sublist_size = 50
+    ids_sublists = [ids[i : i + sublist_size] for i in range(0, len(ids), sublist_size)]
+
+    def process_sublist(fifty_ids):
+        nonlocal stats
+        views, likes = count_views(video_ids=fifty_ids, apikey=apikey)
+        stats["views"] += views
+        stats["likes"] += likes
+
+    # Using ThreadPoolExecutor to run the counting in parallel
+    with ThreadPoolExecutor() as executor:
+        executor.map(process_sublist, ids_sublists)
+
     return stats
 
 
-# def lambda_handler(event, context):
-#     secrets = read_secrets()
-#     apikey = secrets["apikey"]
-#     playlistId = secrets["playlistId"]
-#     ids = get_playlist_items(playlistId=playlistId, apikey=apikey)
-#     stats = count_views(ids=ids, apikey=apikey)
-#     return {"statusCode": 200, "body": json.dumps(stats)}
-
-
-if __name__ == "__main__":
-    start = time.time()
+def lambda_handler(event, context):
     secrets = read_secrets()
-    apikey = secrets["apikey"]
-    playlistId = secrets["playlistId"]
-    ids = get_playlist_items(playlistId=playlistId, apikey=apikey)
-    stats = count_views(ids=ids, apikey=apikey)
-    stop = time.time()
-    print(stats)
-    print(f"Took: {(stop-start)} seconds")
+    key = secrets["apikey"]
+    playlist_id = secrets["playlistId"]
+    return {
+        "statusCode": 200,
+        "body": json.dumps(fetch_and_count(playlist_items=playlist_id, apikey=key)),
+    }
+
+
+# if __name__ == "__main__":
+#     import time
+#     start = time.time()
+#     secrets = read_secrets()
+#     key = secrets["apikey"]
+#     playlist_id = secrets["playlistId"]
+#     start = time.time()
+#     stats = fetch_and_count(playlist_items=playlist_id, apikey=key)
+#     stop = time.time()
+#     print(stats)
+#     print(f"Took: {(stop-start)} seconds")
